@@ -23,5 +23,6 @@ export const env = {
   triggerApiUrl: readOptional('TRIGGER_API_URL') ?? 'https://api.trigger.dev',
   openaiApiKey: readOptional('OPENAI_API_KEY'),
   openaiBaseUrl: readOptional('OPENAI_BASE_URL') ?? 'https://api.xkiro.com/v1',
-  openaiModel: readOptional('OPENAI_MODEL')
+  openaiModel: readOptional('OPENAI_MODEL'),
+  firecrawlApiKey: readOptional('FIRECRAWL_API_KEY')
 }
