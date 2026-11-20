@@ -27,6 +27,9 @@ lerna-debug.log*
 # build
 dist/
 
+# trigger.dev
+.trigger
+
 # misc
 .DS_Store
 .commandcode/
