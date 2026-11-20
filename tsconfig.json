@@ -13,6 +13,6 @@
     "rootDir": ".",
     "outDir": "./dist"
   },
-  "include": ["src", "trigger.config.ts"],
+  "include": ["src", "trigger.config.ts", "drizzle.config.ts"],
   "exclude": ["node_modules"]
 }

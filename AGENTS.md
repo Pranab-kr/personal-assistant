@@ -15,3 +15,10 @@ The local `.env` holds a **development-only** Trigger.dev secret key (`tr_dev_sk
 
 This project has Trigger.dev agent skills installed in `.agents/skills/`. Before writing or changing Trigger.dev code (background tasks, scheduled tasks, realtime, or chat.agent AI agents), load the most relevant skill: `trigger-authoring-chat-agent`, `trigger-authoring-tasks`, `trigger-chat-agent-advanced`, `trigger-cost-savings`, `trigger-getting-started`, `trigger-realtime-and-frontend`.
 <!-- TRIGGER.DEV SKILLS END -->
+
+## Database schema changes: push, don't migrate
+
+This project does not use Drizzle migration files. Apply schema changes directly with `npm run db:push` (`drizzle-kit push`) and keep the schema in `src/db/schema.ts`.
+
+- Never run `drizzle-kit generate` or `drizzle-kit migrate`.
+- Do not create or commit a `drizzle/` migrations folder.

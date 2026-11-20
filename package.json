@@ -6,7 +6,8 @@
     "build": "tsc",
     "start": "node dist/src/index.js",
     "telegram:set-webhook": "tsx src/set-webhook.ts",
-    "daytona:verify": "tsx src/daytona-verify.ts"
+    "daytona:verify": "tsx src/daytona-verify.ts",
+    "db:push": "drizzle-kit push"
   },
   "dependencies": {
     "@ai-sdk/openai": "^4.0.121",
@@ -17,13 +18,17 @@
     "@neon/env": "^2.1.8",
     "@trigger.dev/sdk": "4.8.8",
     "ai": "^7.0.177",
+    "drizzle-orm": "^0.45.4",
     "hono": "^4.13.16",
+    "pg": "^8.23.1",
     "zod": "^4.6.7"
   },
   "devDependencies": {
     "@hono/cli": "^1.0.0-rc.9",
     "@trigger.dev/build": "4.8.8",
     "@types/node": "^26.1.1",
+    "@types/pg": "^8.23.1",
+    "drizzle-kit": "^0.31.11",
     "tsx": "^4.23.0",
     "typescript": "^7.0.2"
   }

@@ -38,3 +38,4 @@ dist/
 .commandcode/
 .firecrawl/
 .neon
+.claude/
