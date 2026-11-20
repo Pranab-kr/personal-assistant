@@ -5,7 +5,7 @@ if (existsSync('.env')) {
   loadEnvFile('.env')
 }
 
-const requiredVariables = ['TELEGRAM_BOT_TOKEN', 'TELEGRAM_WEBHOOK_SECRET'] as const
+const requiredVariables = ['TELEGRAM_BOT_TOKEN'] as const
 
 const missingVariables = requiredVariables.filter((name) => !process.env[name]?.trim())
 
@@ -18,7 +18,9 @@ const readOptional = (name: string) => process.env[name]?.trim() || undefined
 
 export const env = {
   telegramBotToken: readRequired('TELEGRAM_BOT_TOKEN'),
-  telegramWebhookSecret: readRequired('TELEGRAM_WEBHOOK_SECRET'),
+  telegramWebhookSecret: readOptional('TELEGRAM_WEBHOOK_SECRET'),
+  triggerSecretKey: readOptional('TRIGGER_SECRET_KEY'),
+  triggerApiUrl: readOptional('TRIGGER_API_URL') ?? 'https://api.trigger.dev',
   openaiApiKey: readOptional('OPENAI_API_KEY'),
   openaiBaseUrl: readOptional('OPENAI_BASE_URL') ?? 'https://api.xkiro.com/v1',
   openaiModel: readOptional('OPENAI_MODEL')

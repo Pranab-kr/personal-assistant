@@ -30,6 +30,9 @@ dist/
 # trigger.dev
 .trigger
 
+# transcript storage
+.data/
+
 # misc
 .DS_Store
 .commandcode/
