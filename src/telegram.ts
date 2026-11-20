@@ -1,5 +1,7 @@
 import { timingSafeEqual } from 'node:crypto'
+import { generateText } from 'ai'
 import { Hono } from 'hono'
+import { model } from './ai.js'
 import { env } from './env.js'
 
 type TelegramUser = {
@@ -77,9 +79,14 @@ telegram.post('/webhook', async (c) => {
   const update = await c.req.json<TelegramUpdate>()
 
   if (update.message?.text) {
+    const { text } = await generateText({
+      model,
+      prompt: update.message.text
+    })
+
     await callTelegram<TelegramMessage>('sendMessage', {
       chat_id: update.message.chat.id,
-      text: update.message.text
+      text: text.slice(0, 4096)
     })
   }
 

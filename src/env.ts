@@ -14,8 +14,12 @@ if (missingVariables.length > 0) {
 }
 
 const readRequired = (name: (typeof requiredVariables)[number]) => process.env[name]!.trim()
+const readOptional = (name: string) => process.env[name]?.trim() || undefined
 
 export const env = {
   telegramBotToken: readRequired('TELEGRAM_BOT_TOKEN'),
-  telegramWebhookSecret: readRequired('TELEGRAM_WEBHOOK_SECRET')
+  telegramWebhookSecret: readRequired('TELEGRAM_WEBHOOK_SECRET'),
+  openaiApiKey: readOptional('OPENAI_API_KEY'),
+  openaiBaseUrl: readOptional('OPENAI_BASE_URL') ?? 'https://api.xkiro.com/v1',
+  openaiModel: readOptional('OPENAI_MODEL')
 }
