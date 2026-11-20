@@ -1,65 +1,22 @@
 import { webhooks } from "@trigger.dev/sdk"
 import { chat } from "@trigger.dev/sdk/ai"
-import { stepCountIs } from "ai"
+import { stepCountIs, type UIMessage } from "ai"
 import { model } from "../ai.js"
-import { env } from "../env.js"
+import { createDaytonaTools, setChatAttachments } from "../daytona.js"
 import { firecrawlTools } from "../firecrawl.js"
+import {
+  callTelegram,
+  collectAttachments,
+  describeAttachments,
+  downloadTelegramFile,
+  extractAttachments,
+  rememberTelegramThread,
+  telegramFileIdFromUrl,
+  telegramFileUrl,
+  type TelegramHandle,
+  type TelegramUpdate
+} from "../telegram-files.js"
 import { createFileTranscriptStorage } from "./transcript-storage.js"
-
-type TelegramUser = {
-  id: number
-  is_bot: boolean
-  first_name: string
-  username?: string
-}
-
-type TelegramChat = {
-  id: number
-  type: "private" | "group" | "supergroup" | "channel"
-}
-
-type TelegramMessage = {
-  message_id: number
-  message_thread_id?: number
-  from?: TelegramUser
-  chat: TelegramChat
-  date: number
-  text?: string
-}
-
-type TelegramUpdate = {
-  update_id: number
-  message?: TelegramMessage
-}
-
-type TelegramHandle = {
-  chatId: number
-  messageThreadId?: number
-}
-
-type TelegramApiResponse<T> = {
-  ok: boolean
-  result?: T
-  description?: string
-}
-
-const telegramApi = `https://api.telegram.org/bot${env.telegramBotToken}`
-
-async function callTelegram<T>(method: string, payload: unknown): Promise<T> {
-  const response = await fetch(`${telegramApi}/${method}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload)
-  })
-
-  const data = (await response.json()) as TelegramApiResponse<T>
-
-  if (!response.ok || !data.ok) {
-    throw new Error(`Telegram ${method} failed: ${data.description ?? `HTTP ${response.status}`}`)
-  }
-
-  return data.result as T
-}
 
 function splitMessage(text: string, limit = 4000): string[] {
   const chunks: string[] = []
@@ -116,20 +73,76 @@ export const telegramChannel = chat.channels.custom({
   id: "telegram",
   endpoint: telegramEndpoint,
   key: "{event.message.chat.id}",
-  filter: "event.message.text != null",
+  filter:
+    "event.message != null && (event.message.text != null || event.message.caption != null || event.message.document != null || event.message.photo != null)",
   inbound: (update) => {
     const message = update.message
-    const text = message?.text?.trim()
 
-    if (!message || !text) {
+    if (!message) {
       return ""
     }
 
+    const text = message.text?.trim() || message.caption?.trim() || ""
+    const { attachments, skipped } = extractAttachments(message)
+
+    if (!text && attachments.length === 0 && skipped.length === 0) {
+      return ""
+    }
+
+    rememberTelegramThread(message.chat.id, message.message_thread_id)
+
+    const notes: string[] = []
+
+    if (text) {
+      notes.push(text)
+    }
+
+    if (attachments.length > 0) {
+      notes.push(`[Attached files]\n${describeAttachments(attachments)}`)
+    }
+
+    if (skipped.length > 0) {
+      notes.push(
+        `[Not downloaded: ${skipped.join(", ")} — Telegram's 20 MB bot download limit]`
+      )
+    }
+
+    const parts: UIMessage["parts"] = [{ type: "text", text: notes.join("\n\n") }]
+
+    for (const attachment of attachments) {
+      parts.push({ type: "data-attachment", data: attachment })
+
+      if (attachment.mediaType.startsWith("image/")) {
+        parts.push({
+          type: "file",
+          mediaType: attachment.mediaType,
+          filename: attachment.fileName,
+          url: telegramFileUrl(attachment)
+        })
+      }
+    }
+
     return {
-      message: text,
+      message: {
+        id: `tg-${message.message_id}`,
+        role: "user",
+        parts
+      },
       externalUserId: String(message.from?.id ?? message.chat.id),
       externalMessageId: String(message.message_id)
     }
+  },
+  download: async (url) => {
+    const fileId = telegramFileIdFromUrl(url)
+
+    if (!fileId) {
+      return null
+    }
+
+    const data = await downloadTelegramFile(fileId)
+    const mediaType = url.searchParams.get("mediaType") || "application/octet-stream"
+
+    return { data, mediaType }
   },
   bind: (update) => {
     const message = update.message
@@ -137,6 +150,8 @@ export const telegramChannel = chat.channels.custom({
     if (!message) {
       return null
     }
+
+    rememberTelegramThread(message.chat.id, message.message_thread_id)
 
     return {
       chatId: message.chat.id,
@@ -187,6 +202,14 @@ Also use tools when the user asks you to find, check, compare, look up, see, or 
 7. If a required input is missing (city, dates, size, ticker, URL) and cannot be inferred from context, ask one short clarifying question. Otherwise make a reasonable assumption and say what it is.
 8. If a tool returns an error or no results, try one reasonable fallback (a different query or a page scrape). Then tell the user plainly that you could not find live data instead of guessing.
 
+# Files, the sandbox, and computer use
+Every chat has a persistent Daytona sandbox with Python, pypdf, reportlab, pillow, and PyMuPDF (import pymupdf) preinstalled. Files the user sends are downloaded into uploads/. Put generated files in outputs/.
+- Use sandbox_list_files before assuming a path. Use sandbox_read_file for text and sandbox_python or sandbox_exec for processing.
+- For PDFs, extract text with pypdf or PyMuPDF. Inspect AcroForm fields with pypdf and fill them with the values the user provides. For flat PDFs, use PyMuPDF search_for to locate labels and insert_text at the returned rectangles, or overlay with reportlab. Add a visible fill (for example a different color or a light box behind the text) when that helps the user see what was added.
+- To send a file back, call send_file_to_user with the sandbox path and a short caption. Never claim a file was sent unless the tool succeeded.
+- For GUI tasks, use computer_action. Take a screenshot first so you can see the screen, then click, type, or press keys. Coordinates use the screenshot's pixel space.
+- Do not invent signatures, identity details, or legal attestations for real documents. For a document clearly marked as a sample or test fixture, placeholder names and typed signature placeholders are fine. For real legal documents, fill only information the user provides and let the user sign.
+
 # Presenting answers
 - Answer first, then the useful details: price, time, place, and a link when it helps the user act.
 - Do not narrate tool use or describe your process; just give the answer.
@@ -200,7 +223,13 @@ export const telegramAgent = chat.agent({
   channels: [telegramChannel],
   storage: transcriptStorage,
   system: systemPrompt,
-  tools: firecrawlTools,
+  onTurnStart: async ({ chatId, uiMessages }) => {
+    setChatAttachments(chatId, collectAttachments(uiMessages))
+  },
+  tools: (event) => ({
+    ...firecrawlTools,
+    ...createDaytonaTools(event.chatId)
+  }),
   run: async ({ messages, tools, signal, streamText }) =>
     streamText({
       model,

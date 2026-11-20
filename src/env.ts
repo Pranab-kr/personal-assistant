@@ -5,7 +5,7 @@ if (existsSync('.env')) {
   loadEnvFile('.env')
 }
 
-const requiredVariables = ['TELEGRAM_BOT_TOKEN'] as const
+const requiredVariables = ['TELEGRAM_BOT_TOKEN', 'DAYTONA_API_KEY'] as const
 
 const missingVariables = requiredVariables.filter((name) => !process.env[name]?.trim())
 
@@ -24,5 +24,6 @@ export const env = {
   openaiApiKey: readOptional('OPENAI_API_KEY'),
   openaiBaseUrl: readOptional('OPENAI_BASE_URL') ?? 'https://api.xkiro.com/v1',
   openaiModel: readOptional('OPENAI_MODEL'),
-  firecrawlApiKey: readOptional('FIRECRAWL_API_KEY')
+  firecrawlApiKey: readOptional('FIRECRAWL_API_KEY'),
+  daytonaApiKey: readRequired('DAYTONA_API_KEY')
 }
