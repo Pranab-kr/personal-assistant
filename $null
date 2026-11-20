@@ -1,0 +1,5 @@
+npm warn "if" is being parsed as a normal command line argument.
+npm warn Unknown cli config "--ENV---;". This will stop working in the next major version of npm.
+npm error code EINVALIDTAGNAME
+npm error Invalid tag name ";" of package ";": Tags may not have any characters that encodeURIComponent encodes.
+npm error A complete log of this run can be found in: C:\Users\prana\AppData\Local\npm-cache\_logs\2026-11-20T17_42_20_988Z-debug-0.log

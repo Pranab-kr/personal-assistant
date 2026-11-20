@@ -8,6 +8,13 @@
       "skillPath": "skills/ai-sdk/SKILL.md",
       "computedHash": "59cd2dc82c5458f2819992fc3d27204ed16edfc9170870c6f8f04c44bac17772"
     },
+    "daytona": {
+      "source": "daytona/skills",
+      "commit": "c62797f71f2f22046992c47ca7d8eb02f4170544",
+      "sourceType": "github",
+      "skillPath": "skills/daytona/SKILL.md",
+      "computedHash": "e0b49c5f114461c48b81ced3f605c7b67a0fd25b2db2f8fd2072ff4b6e187e32"
+    },
     "hono": {
       "source": "honojs/skills",
       "commit": "e54ce51f6effaeb574ebd2629e89e086e14a2db3",
