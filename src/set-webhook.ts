@@ -5,7 +5,7 @@ const telegramWebhookSecret = requireEnv('TELEGRAM_WEBHOOK_SECRET')
 const triggerWebhookSecret = env.triggerWebhookSecret ?? telegramWebhookSecret
 const triggerSecretKey = requireEnv('TRIGGER_SECRET_KEY')
 const endpointId = env.triggerWebhookEndpointId
-const appBaseUrl = requireEnv('APP_BASE_URL')
+const appBaseUrl = requireEnv('APP_BASE_URL').replace(/\/+$/, '')
 
 if (!/^https:\/\/.+/.test(appBaseUrl)) {
   throw new Error('APP_BASE_URL must be an https:// URL (for example https://your-app.up.railway.app)')

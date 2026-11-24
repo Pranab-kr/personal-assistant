@@ -1,5 +1,5 @@
 import { timingSafeEqual } from 'node:crypto'
-import { idempotencyKeys, tasks } from '@trigger.dev/sdk'
+import { configure, idempotencyKeys, tasks } from '@trigger.dev/sdk'
 import { Hono } from 'hono'
 import { startDeviceAuthorization, type ClerkDeviceAuthStart } from './clerk-device-auth.js'
 import { findClerkUserIdByTelegramId } from './db/channel-identifiers.js'
@@ -105,6 +105,24 @@ async function defaultForwardToTriggerWebhook(
   }
 }
 
+let triggerConfigured = false
+
+function ensureTriggerConfigured(): void {
+  if (triggerConfigured) {
+    return
+  }
+
+  configure({
+    baseURL: env.triggerApiUrl,
+    accessToken: requireEnv('TRIGGER_SECRET_KEY'),
+    // Prevent @trigger.dev/sdk from reading Vercel's VERCEL_GIT_COMMIT_REF ("main")
+    // and sending an invalid x-trigger-branch header on non-branched dev/prod envs.
+    previewBranch: process.env.TRIGGER_PREVIEW_BRANCH?.trim() ?? ''
+  })
+
+  triggerConfigured = true
+}
+
 async function defaultTriggerLinkAccountTask(payload: {
   telegramUserId: string
   telegramChatId: number
@@ -113,6 +131,8 @@ async function defaultTriggerLinkAccountTask(payload: {
   interval: number
   userCode: string
 }): Promise<void> {
+  ensureTriggerConfigured()
+
   const idempotencyKey = await idempotencyKeys.create(
     `link-telegram:${payload.telegramUserId}:${payload.userCode}`,
     { scope: 'global' }
