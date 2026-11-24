@@ -8,6 +8,9 @@
     "types": [
       "node"
     ],
+    "typeRoots": [
+      "./node_modules/@types"
+    ],
     "jsx": "react-jsx",
     "jsxImportSource": "hono/jsx",
     "rootDir": ".",
