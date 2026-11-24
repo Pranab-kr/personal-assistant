@@ -5,25 +5,73 @@ if (existsSync('.env')) {
   loadEnvFile('.env')
 }
 
-const requiredVariables = ['TELEGRAM_BOT_TOKEN', 'DAYTONA_API_KEY'] as const
-
-const missingVariables = requiredVariables.filter((name) => !process.env[name]?.trim())
-
-if (missingVariables.length > 0) {
-  throw new Error(`Missing required environment variables: ${missingVariables.join(', ')}`)
+export function readOptionalEnv(name: string): string | undefined {
+  return process.env[name]?.trim() || undefined
 }
 
-const readRequired = (name: (typeof requiredVariables)[number]) => process.env[name]!.trim()
-const readOptional = (name: string) => process.env[name]?.trim() || undefined
+export function requireEnv(name: string): string {
+  const value = readOptionalEnv(name)
+
+  if (!value) {
+    throw new Error(`Missing required environment variable: ${name}`)
+  }
+
+  return value
+}
 
 export const env = {
-  telegramBotToken: readRequired('TELEGRAM_BOT_TOKEN'),
-  telegramWebhookSecret: readOptional('TELEGRAM_WEBHOOK_SECRET'),
-  triggerSecretKey: readOptional('TRIGGER_SECRET_KEY'),
-  triggerApiUrl: readOptional('TRIGGER_API_URL') ?? 'https://api.trigger.dev',
-  openaiApiKey: readOptional('OPENAI_API_KEY'),
-  openaiBaseUrl: readOptional('OPENAI_BASE_URL') ?? 'https://api.xkiro.com/v1',
-  openaiModel: readOptional('OPENAI_MODEL'),
-  firecrawlApiKey: readOptional('FIRECRAWL_API_KEY'),
-  daytonaApiKey: readRequired('DAYTONA_API_KEY')
+  get telegramBotToken() {
+    return readOptionalEnv('TELEGRAM_BOT_TOKEN')
+  },
+  get telegramWebhookSecret() {
+    return readOptionalEnv('TELEGRAM_WEBHOOK_SECRET')
+  },
+  get triggerWebhookSecret() {
+    return readOptionalEnv('TRIGGER_WEBHOOK_SECRET')
+  },
+  get triggerSecretKey() {
+    return readOptionalEnv('TRIGGER_SECRET_KEY')
+  },
+  get triggerApiUrl() {
+    return (readOptionalEnv('TRIGGER_API_URL') ?? 'https://api.trigger.dev').replace(/\/+$/, '')
+  },
+  get triggerWebhookEndpointId() {
+    return readOptionalEnv('TRIGGER_WEBHOOK_ENDPOINT_ID') ?? 'telegram'
+  },
+  get triggerTelegramWebhookUrl() {
+    return readOptionalEnv('TRIGGER_TELEGRAM_WEBHOOK_URL')
+  },
+  get appBaseUrl() {
+    return readOptionalEnv('APP_BASE_URL')?.replace(/\/+$/, '')
+  },
+  get databaseUrl() {
+    return readOptionalEnv('DATABASE_URL')
+  },
+  get clerkPublishableKey() {
+    return readOptionalEnv('CLERK_PUBLISHABLE_KEY')
+  },
+  get clerkFrontendApiUrl() {
+    return readOptionalEnv('CLERK_FRONTEND_API_URL')?.replace(/\/+$/, '')
+  },
+  get clerkOAuthClientId() {
+    return readOptionalEnv('CLERK_OAUTH_CLIENT_ID')
+  },
+  get clerkOAuthClientSecret() {
+    return readOptionalEnv('CLERK_OAUTH_CLIENT_SECRET')
+  },
+  get openaiApiKey() {
+    return readOptionalEnv('OPENAI_API_KEY')
+  },
+  get openaiBaseUrl() {
+    return readOptionalEnv('OPENAI_BASE_URL') ?? 'https://api.xkiro.com/v1'
+  },
+  get openaiModel() {
+    return readOptionalEnv('OPENAI_MODEL')
+  },
+  get firecrawlApiKey() {
+    return readOptionalEnv('FIRECRAWL_API_KEY')
+  },
+  get daytonaApiKey() {
+    return readOptionalEnv('DAYTONA_API_KEY')
+  }
 }

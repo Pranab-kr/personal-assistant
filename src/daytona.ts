@@ -2,13 +2,13 @@ import { posix as pathPosix } from 'node:path'
 import { Daytona, type DaytonaV0Client } from '@daytona/sdk'
 import { tool } from 'ai'
 import { z } from 'zod'
-import { env } from './env.js'
+import { requireEnv } from './env.js'
 import {
   TELEGRAM_UPLOAD_DIR,
   downloadTelegramFile,
   sendTelegramFile,
-  telegramThreadFor,
-  type TelegramAttachment
+  type TelegramAttachment,
+  type TelegramTarget
 } from './telegram-files.js'
 
 type V0Sandbox = Awaited<ReturnType<DaytonaV0Client['create']>>
@@ -19,14 +19,23 @@ const OUTPUT_DIR = 'outputs'
 const SCREENSHOT_DIR = 'screenshots'
 const SANDBOX_APP_LABEL = 'personal-assistant'
 
-const daytona = new Daytona({ apiKey: env.daytonaApiKey })
+let daytonaClient: Daytona | undefined
+
+function getDaytona(): Daytona {
+  if (!daytonaClient) {
+    daytonaClient = new Daytona({ apiKey: requireEnv('DAYTONA_API_KEY') })
+  }
+
+  return daytonaClient
+}
 
 const sandboxPromises = new Map<string, Promise<V0Sandbox>>()
 const preparePromises = new Map<string, Promise<void>>()
 const preparedSandboxes = new Set<string>()
 const uploadedFiles = new Map<string, Set<string>>()
 const computerReady = new Set<string>()
-const attachmentsByChat = new Map<string, TelegramAttachment[]>()
+const attachmentsByUser = new Map<string, TelegramAttachment[]>()
+const telegramTargetsByUser = new Map<string, TelegramTarget>()
 
 const mediaTypes: Record<string, string> = {
   '.pdf': 'application/pdf',
@@ -64,11 +73,11 @@ function shellQuote(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`
 }
 
-function invalidateIfGone(chatId: string, error: unknown): void {
+function invalidateIfGone(clerkUserId: string, error: unknown): void {
   const message = errorMessage(error).toLowerCase()
 
   if (message.includes('destroyed') || message.includes('not found') || message.includes('404')) {
-    sandboxPromises.delete(chatId)
+    sandboxPromises.delete(clerkUserId)
   }
 }
 
@@ -78,15 +87,23 @@ function toolError(error: unknown) {
   return { ok: false as const, error: errorMessage(error) }
 }
 
-export function setChatAttachments(chatId: string, attachments: TelegramAttachment[]): void {
-  attachmentsByChat.set(chatId, attachments)
+export function setUserAttachments(clerkUserId: string, attachments: TelegramAttachment[]): void {
+  attachmentsByUser.set(clerkUserId, attachments)
 }
 
-async function findExistingSandbox(chatId: string): Promise<V0Sandbox | undefined> {
+export function setUserTelegramTarget(clerkUserId: string, target: TelegramTarget): void {
+  telegramTargetsByUser.set(clerkUserId, target)
+}
+
+export function getUserTelegramTarget(clerkUserId: string): TelegramTarget | undefined {
+  return telegramTargetsByUser.get(clerkUserId)
+}
+
+async function findExistingSandbox(clerkUserId: string): Promise<V0Sandbox | undefined> {
   let found: V0Sandbox | undefined
 
-  for await (const sandbox of daytona.v0.list({
-    labels: { app: SANDBOX_APP_LABEL, chatId }
+  for await (const sandbox of getDaytona().v0.list({
+    labels: { app: SANDBOX_APP_LABEL, clerkUserId }
   })) {
     if (sandbox.state === 'destroyed' || sandbox.state === 'destroying') {
       continue
@@ -112,7 +129,7 @@ async function startSandbox(sandbox: V0Sandbox): Promise<void> {
   }
 
   if (state === 'stopped' || state === 'paused' || state === 'archived') {
-    await daytona.v0.start(sandbox, 180)
+    await getDaytona().v0.start(sandbox, 180)
     return
   }
 
@@ -165,8 +182,8 @@ async function prepareSandbox(sandbox: V0Sandbox): Promise<void> {
   return promise
 }
 
-async function stageAttachments(chatId: string, sandbox: V0Sandbox): Promise<void> {
-  const attachments = attachmentsByChat.get(chatId) ?? []
+async function stageAttachments(clerkUserId: string, sandbox: V0Sandbox): Promise<void> {
+  const attachments = attachmentsByUser.get(clerkUserId) ?? []
 
   if (attachments.length === 0) {
     return
@@ -197,11 +214,11 @@ async function stageAttachments(chatId: string, sandbox: V0Sandbox): Promise<voi
   }
 }
 
-async function createSandbox(chatId: string): Promise<V0Sandbox> {
-  return daytona.v0.create(
+async function createSandbox(clerkUserId: string): Promise<V0Sandbox> {
+  return getDaytona().v0.create(
     {
       language: 'python',
-      labels: { app: SANDBOX_APP_LABEL, chatId },
+      labels: { app: SANDBOX_APP_LABEL, clerkUserId },
       autoStopInterval: 15,
       autoDeleteInterval: 1440
     },
@@ -209,12 +226,12 @@ async function createSandbox(chatId: string): Promise<V0Sandbox> {
   )
 }
 
-export async function ensureSandbox(chatId: string): Promise<V0Sandbox> {
-  let promise = sandboxPromises.get(chatId)
+export async function ensureSandbox(clerkUserId: string): Promise<V0Sandbox> {
+  let promise = sandboxPromises.get(clerkUserId)
 
   if (!promise) {
     promise = (async () => {
-      let sandbox = await findExistingSandbox(chatId)
+      let sandbox = await findExistingSandbox(clerkUserId)
 
       if (sandbox) {
         try {
@@ -224,23 +241,23 @@ export async function ensureSandbox(chatId: string): Promise<V0Sandbox> {
             '[daytona] could not reuse sandbox, creating a new one:',
             errorMessage(error)
           )
-          await daytona.v0.delete(sandbox, 60, true).catch(() => undefined)
+          await getDaytona().v0.delete(sandbox, 60, true).catch(() => undefined)
           sandbox = undefined
         }
       }
 
       if (!sandbox) {
-        sandbox = await createSandbox(chatId)
+        sandbox = await createSandbox(clerkUserId)
       }
 
       await prepareSandbox(sandbox)
-      await stageAttachments(chatId, sandbox)
+      await stageAttachments(clerkUserId, sandbox)
 
       return sandbox
     })()
 
-    sandboxPromises.set(chatId, promise)
-    void promise.catch(() => sandboxPromises.delete(chatId))
+    sandboxPromises.set(clerkUserId, promise)
+    void promise.catch(() => sandboxPromises.delete(clerkUserId))
   }
 
   return promise
@@ -261,10 +278,7 @@ async function ensureComputerUse(sandbox: V0Sandbox): Promise<void> {
   computerReady.add(sandbox.id)
 }
 
-export function createDaytonaTools(chatId: string) {
-  const numericChatId = Number(chatId)
-  const hasTelegramChat = Number.isFinite(numericChatId)
-
+export function createDaytonaTools(clerkUserId: string) {
   return {
     sandbox_exec: tool({
       description:
@@ -282,7 +296,7 @@ export function createDaytonaTools(chatId: string) {
       }),
       execute: async ({ command, cwd, timeout }) => {
         try {
-          const sandbox = await ensureSandbox(chatId)
+          const sandbox = await ensureSandbox(clerkUserId)
           const response = await sandbox.process.executeCommand(
             command,
             cwd,
@@ -296,7 +310,7 @@ export function createDaytonaTools(chatId: string) {
             output: truncate(response.result ?? '')
           }
         } catch (error) {
-          invalidateIfGone(chatId, error)
+          invalidateIfGone(clerkUserId, error)
           return toolError(error)
         }
       }
@@ -317,7 +331,7 @@ export function createDaytonaTools(chatId: string) {
       }),
       execute: async ({ code, timeout }) => {
         try {
-          const sandbox = await ensureSandbox(chatId)
+          const sandbox = await ensureSandbox(clerkUserId)
           const response = await sandbox.process.codeRun(code, undefined, timeout)
 
           return {
@@ -326,7 +340,7 @@ export function createDaytonaTools(chatId: string) {
             output: truncate(response.result ?? '')
           }
         } catch (error) {
-          invalidateIfGone(chatId, error)
+          invalidateIfGone(clerkUserId, error)
           return toolError(error)
         }
       }
@@ -340,7 +354,7 @@ export function createDaytonaTools(chatId: string) {
       }),
       execute: async ({ path }) => {
         try {
-          const sandbox = await ensureSandbox(chatId)
+          const sandbox = await ensureSandbox(clerkUserId)
           const files = await sandbox.fs.listFiles(path)
 
           return {
@@ -354,7 +368,7 @@ export function createDaytonaTools(chatId: string) {
             }))
           }
         } catch (error) {
-          invalidateIfGone(chatId, error)
+          invalidateIfGone(clerkUserId, error)
           return toolError(error)
         }
       }
@@ -375,7 +389,7 @@ export function createDaytonaTools(chatId: string) {
       }),
       execute: async ({ path, max_chars }) => {
         try {
-          const sandbox = await ensureSandbox(chatId)
+          const sandbox = await ensureSandbox(clerkUserId)
           const bytes = await sandbox.fs.downloadFile(path)
 
           if (bytes.includes(0)) {
@@ -396,7 +410,7 @@ export function createDaytonaTools(chatId: string) {
             content: truncate(text, max_chars)
           }
         } catch (error) {
-          invalidateIfGone(chatId, error)
+          invalidateIfGone(clerkUserId, error)
           return toolError(error)
         }
       }
@@ -415,7 +429,7 @@ export function createDaytonaTools(chatId: string) {
       }),
       execute: async ({ path, content, encoding }) => {
         try {
-          const sandbox = await ensureSandbox(chatId)
+          const sandbox = await ensureSandbox(clerkUserId)
           const directory = pathPosix.dirname(path)
 
           if (directory && directory !== '.') {
@@ -431,7 +445,7 @@ export function createDaytonaTools(chatId: string) {
 
           return { ok: true, path, size: bytes.byteLength }
         } catch (error) {
-          invalidateIfGone(chatId, error)
+          invalidateIfGone(clerkUserId, error)
           return toolError(error)
         }
       }
@@ -445,18 +459,20 @@ export function createDaytonaTools(chatId: string) {
         caption: z.string().optional().describe('Short caption shown with the file.')
       }),
       execute: async ({ path, caption }) => {
-        if (!hasTelegramChat) {
+        const telegramTarget = getUserTelegramTarget(clerkUserId)
+
+        if (!telegramTarget) {
           return { ok: false, error: 'This chat is not a Telegram chat.' }
         }
 
         try {
-          const sandbox = await ensureSandbox(chatId)
+          const sandbox = await ensureSandbox(clerkUserId)
           const bytes = await sandbox.fs.downloadFile(path)
           const fileName = pathPosix.basename(path) || 'file'
 
           const result = await sendTelegramFile({
-            chatId: numericChatId,
-            threadId: telegramThreadFor(numericChatId),
+            chatId: telegramTarget.chatId,
+            threadId: telegramTarget.messageThreadId,
             bytes,
             fileName,
             mediaType: inferMediaType(fileName),
@@ -471,7 +487,7 @@ export function createDaytonaTools(chatId: string) {
             method: result.method
           }
         } catch (error) {
-          invalidateIfGone(chatId, error)
+          invalidateIfGone(clerkUserId, error)
           return toolError(error)
         }
       }
@@ -508,12 +524,14 @@ export function createDaytonaTools(chatId: string) {
           .describe('Mouse button for click. Defaults to left.')
       }),
       execute: async ({ action, x, y, text, key, direction, amount, button }) => {
-        if (!hasTelegramChat) {
+        const telegramTarget = getUserTelegramTarget(clerkUserId)
+
+        if (!telegramTarget) {
           return { ok: false, error: 'This chat is not a Telegram chat.' }
         }
 
         try {
-          const sandbox = await ensureSandbox(chatId)
+          const sandbox = await ensureSandbox(clerkUserId)
           await ensureComputerUse(sandbox)
 
           if (action === 'screenshot') {
@@ -534,8 +552,8 @@ export function createDaytonaTools(chatId: string) {
 
             await sandbox.fs.uploadFile(bytes, path)
             await sendTelegramFile({
-              chatId: numericChatId,
-              threadId: telegramThreadFor(numericChatId),
+              chatId: telegramTarget.chatId,
+              threadId: telegramTarget.messageThreadId,
               bytes,
               fileName: pathPosix.basename(path),
               mediaType: 'image/jpeg',
@@ -589,7 +607,7 @@ export function createDaytonaTools(chatId: string) {
 
           return { ok: true, action, key }
         } catch (error) {
-          invalidateIfGone(chatId, error)
+          invalidateIfGone(clerkUserId, error)
           return toolError(error)
         }
       },

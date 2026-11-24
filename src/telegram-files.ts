@@ -1,5 +1,5 @@
 import type { UIMessage } from 'ai'
-import { env } from './env.js'
+import { requireEnv } from './env.js'
 
 export type TelegramUser = {
   id: number
@@ -47,10 +47,16 @@ export type TelegramUpdate = {
   message?: TelegramMessage
 }
 
+export type AuthenticatedTelegramUpdate = TelegramUpdate & {
+  clerkUserId: string
+}
+
 export type TelegramHandle = {
   chatId: number
   messageThreadId?: number
 }
+
+export type TelegramTarget = TelegramHandle
 
 export type TelegramAttachment = {
   fileId: string
@@ -78,14 +84,20 @@ export const TELEGRAM_UPLOAD_DIR = 'uploads'
 export const MAX_TELEGRAM_DOWNLOAD_BYTES = 20 * 1024 * 1024
 export const MAX_TELEGRAM_UPLOAD_BYTES = 50 * 1024 * 1024
 
-const telegramApi = `https://api.telegram.org/bot${env.telegramBotToken}`
+function telegramApiUrl(): string {
+  return `https://api.telegram.org/bot${requireEnv('TELEGRAM_BOT_TOKEN')}`
+}
+
+function telegramFileApiUrl(): string {
+  return `https://api.telegram.org/file/bot${requireEnv('TELEGRAM_BOT_TOKEN')}`
+}
 
 const threadIds = new Map<number, number | undefined>()
 const filePaths = new Map<string, string>()
 const fileCache = new Map<string, Uint8Array>()
 
 export async function callTelegram<T>(method: string, payload: unknown): Promise<T> {
-  const response = await fetch(`${telegramApi}/${method}`, {
+  const response = await fetch(`${telegramApiUrl()}/${method}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload)
@@ -100,8 +112,24 @@ export async function callTelegram<T>(method: string, payload: unknown): Promise
   return data.result as T
 }
 
+export async function sendTelegramMessage(params: {
+  chatId: number
+  text: string
+  messageThreadId?: number
+  disableLinkPreview?: boolean
+}): Promise<number> {
+  const message = await callTelegram<{ message_id: number }>('sendMessage', {
+    chat_id: params.chatId,
+    text: params.text,
+    ...(params.messageThreadId ? { message_thread_id: params.messageThreadId } : {}),
+    link_preview_options: { is_disabled: params.disableLinkPreview ?? true }
+  })
+
+  return message.message_id
+}
+
 async function callTelegramForm<T>(method: string, form: FormData): Promise<T> {
-  const response = await fetch(`${telegramApi}/${method}`, {
+  const response = await fetch(`${telegramApiUrl()}/${method}`, {
     method: 'POST',
     body: form
   })
@@ -205,6 +233,40 @@ export function collectAttachments(uiMessages: UIMessage[]): TelegramAttachment[
   return attachments
 }
 
+export function extractLatestTelegramTarget(uiMessages: UIMessage[]): TelegramTarget | undefined {
+  for (let i = uiMessages.length - 1; i >= 0; i--) {
+    const message = uiMessages[i]
+
+    for (let j = message.parts.length - 1; j >= 0; j--) {
+      const part = message.parts[j]
+
+      if (part.type !== 'data-telegram-target') {
+        continue
+      }
+
+      const target = part.data as Partial<TelegramTarget> | undefined
+
+      if (typeof target?.chatId === 'number' && Number.isFinite(target.chatId)) {
+        return {
+          chatId: target.chatId,
+          ...(typeof target.messageThreadId === 'number'
+            ? { messageThreadId: target.messageThreadId }
+            : {})
+        }
+      }
+    }
+
+    const metadata = message.metadata as { externalUserId?: unknown } | undefined
+    const externalUserId = metadata?.externalUserId
+
+    if (typeof externalUserId === 'string' && /^\d+$/.test(externalUserId)) {
+      return { chatId: Number(externalUserId) }
+    }
+  }
+
+  return undefined
+}
+
 export function describeAttachments(attachments: TelegramAttachment[]): string {
   return attachments.map((attachment) => `${attachment.fileName} -> ${attachment.sandboxPath}`).join('\n')
 }
@@ -253,7 +315,7 @@ export async function downloadTelegramFile(fileId: string): Promise<Uint8Array> 
   }
 
   const filePath = await getTelegramFilePath(fileId)
-  const response = await fetch(`${telegramApi.replace('/bot', '/file/bot')}/${filePath}`)
+  const response = await fetch(`${telegramFileApiUrl()}/${filePath}`)
 
   if (!response.ok) {
     throw new Error(`Telegram file download failed: HTTP ${response.status}`)

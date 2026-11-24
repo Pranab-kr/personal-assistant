@@ -1,60 +1,34 @@
-import { env } from './env.js'
+import { env, requireEnv } from './env.js'
 
-const endpointId = process.env.TRIGGER_WEBHOOK_ENDPOINT_ID?.trim() || 'telegram'
+const botToken = requireEnv('TELEGRAM_BOT_TOKEN')
+const telegramWebhookSecret = requireEnv('TELEGRAM_WEBHOOK_SECRET')
+const triggerWebhookSecret = env.triggerWebhookSecret ?? telegramWebhookSecret
+const triggerSecretKey = requireEnv('TRIGGER_SECRET_KEY')
+const endpointId = env.triggerWebhookEndpointId
+const appBaseUrl = requireEnv('APP_BASE_URL')
 
-if (!env.telegramWebhookSecret) {
-  throw new Error('Missing required environment variable: TELEGRAM_WEBHOOK_SECRET')
+if (!/^https:\/\/.+/.test(appBaseUrl)) {
+  throw new Error('APP_BASE_URL must be an https:// URL (for example https://your-app.up.railway.app)')
 }
 
-if (!/^[A-Za-z0-9_-]{1,256}$/.test(env.telegramWebhookSecret)) {
+if (!/^[A-Za-z0-9_-]{1,256}$/.test(telegramWebhookSecret)) {
   throw new Error(
     'TELEGRAM_WEBHOOK_SECRET must be 1-256 characters of A-Z, a-z, 0-9, "_" or "-"'
   )
 }
 
-type EndpointListResponse = {
-  data: Array<{ declaredId: string; url: string }>
-}
-
-async function triggerApi(path: string, init?: RequestInit): Promise<Response> {
-  if (!env.triggerSecretKey) {
-    throw new Error('Missing required environment variable: TRIGGER_SECRET_KEY')
-  }
-
-  return fetch(`${env.triggerApiUrl}/api/v1${path}`, {
-    ...init,
-    headers: {
-      Authorization: `Bearer ${env.triggerSecretKey}`,
-      'Content-Type': 'application/json',
-      ...init?.headers
-    }
-  })
-}
-
-async function resolveWebhookUrl(): Promise<string> {
-  const response = await triggerApi('/webhooks/endpoints')
-
-  if (!response.ok) {
-    throw new Error(`Failed to list Trigger.dev webhook endpoints: HTTP ${response.status}`)
-  }
-
-  const { data } = (await response.json()) as EndpointListResponse
-  const endpoint = data.find((item) => item.declaredId === endpointId)
-
-  if (!endpoint) {
-    throw new Error(
-      `Trigger.dev endpoint "${endpointId}" was not found. Run "npx trigger.dev@latest dev" or deploy first.`
-    )
-  }
-
-  return endpoint.url
-}
-
 async function setTriggerEndpointSecret(): Promise<void> {
-  const response = await triggerApi(`/webhooks/endpoints/${endpointId}/secret`, {
-    method: 'PUT',
-    body: JSON.stringify({ secret: env.telegramWebhookSecret })
-  })
+  const response = await fetch(
+    `${env.triggerApiUrl}/api/v1/webhooks/endpoints/${endpointId}/secret`,
+    {
+      method: 'PUT',
+      headers: {
+        Authorization: `Bearer ${triggerSecretKey}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ secret: triggerWebhookSecret })
+    }
+  )
 
   if (!response.ok) {
     throw new Error(
@@ -64,14 +38,14 @@ async function setTriggerEndpointSecret(): Promise<void> {
 }
 
 async function setTelegramWebhook(url: string): Promise<void> {
-  const response = await fetch(`https://api.telegram.org/bot${env.telegramBotToken}/setWebhook`, {
+  const response = await fetch(`https://api.telegram.org/bot${botToken}/setWebhook`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       url,
-      secret_token: env.telegramWebhookSecret,
+      secret_token: telegramWebhookSecret,
       allowed_updates: ['message'],
-      drop_pending_updates: true
+      drop_pending_updates: false
     })
   })
 
@@ -82,9 +56,10 @@ async function setTelegramWebhook(url: string): Promise<void> {
   }
 }
 
-const webhookUrl = await resolveWebhookUrl()
+const honoWebhookUrl = `${appBaseUrl}/webhooks/telegram`
 
 await setTriggerEndpointSecret()
-await setTelegramWebhook(webhookUrl)
+await setTelegramWebhook(honoWebhookUrl)
 
-console.log(`Telegram webhook set to ${webhookUrl}`)
+console.log(`Trigger.dev endpoint "${endpointId}" secret synced`)
+console.log(`Telegram webhook set to ${honoWebhookUrl}`)

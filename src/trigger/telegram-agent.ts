@@ -2,7 +2,11 @@ import { webhooks } from "@trigger.dev/sdk"
 import { chat } from "@trigger.dev/sdk/ai"
 import { stepCountIs, type UIMessage } from "ai"
 import { model } from "../ai.js"
-import { createDaytonaTools, setChatAttachments } from "../daytona.js"
+import {
+  createDaytonaTools,
+  setUserAttachments,
+  setUserTelegramTarget
+} from "../daytona.js"
 import { firecrawlTools } from "../firecrawl.js"
 import {
   callTelegram,
@@ -10,11 +14,12 @@ import {
   describeAttachments,
   downloadTelegramFile,
   extractAttachments,
+  extractLatestTelegramTarget,
   rememberTelegramThread,
   telegramFileIdFromUrl,
   telegramFileUrl,
-  type TelegramHandle,
-  type TelegramUpdate
+  type AuthenticatedTelegramUpdate,
+  type TelegramHandle
 } from "../telegram-files.js"
 import { createFileTranscriptStorage } from "./transcript-storage.js"
 
@@ -55,7 +60,7 @@ async function sendTelegramText(handle: TelegramHandle, text: string): Promise<s
 
 export const telegramEndpoint = webhooks.endpoint.define({
   id: "telegram",
-  source: webhooks.custom<TelegramUpdate>(
+  source: webhooks.custom<AuthenticatedTelegramUpdate>(
     {
       scheme: "shared-secret",
       placement: "header",
@@ -64,7 +69,7 @@ export const telegramEndpoint = webhooks.endpoint.define({
     },
     {
       setupPrompt:
-        "Call the Telegram Bot API setWebhook method with the endpoint URL and the same secret as secret_token, and allowed_updates set to [\"message\"]."
+        "Point Telegram's webhook at the Hono /webhooks/telegram route, and forward authenticated private messages here with clerkUserId attached and the shared secret header."
     }
   )
 })
@@ -72,13 +77,13 @@ export const telegramEndpoint = webhooks.endpoint.define({
 export const telegramChannel = chat.channels.custom({
   id: "telegram",
   endpoint: telegramEndpoint,
-  key: "{event.message.chat.id}",
+  key: "{event.clerkUserId}",
   filter:
-    "event.message != null && (event.message.text != null || event.message.caption != null || event.message.document != null || event.message.photo != null)",
+    "event.clerkUserId != null && event.clerkUserId != '' && event.message != null && event.message.chat.type == 'private' && (event.message.text != null || event.message.caption != null || event.message.document != null || event.message.photo != null)",
   inbound: (update) => {
     const message = update.message
 
-    if (!message) {
+    if (!message || message.chat.type !== "private" || !update.clerkUserId) {
       return ""
     }
 
@@ -90,6 +95,10 @@ export const telegramChannel = chat.channels.custom({
     }
 
     rememberTelegramThread(message.chat.id, message.message_thread_id)
+    setUserTelegramTarget(update.clerkUserId, {
+      chatId: message.chat.id,
+      messageThreadId: message.message_thread_id
+    })
 
     const notes: string[] = []
 
@@ -107,7 +116,16 @@ export const telegramChannel = chat.channels.custom({
       )
     }
 
-    const parts: UIMessage["parts"] = [{ type: "text", text: notes.join("\n\n") }]
+    const parts: UIMessage["parts"] = [
+      { type: "text", text: notes.join("\n\n") },
+      {
+        type: "data-telegram-target",
+        data: {
+          chatId: message.chat.id,
+          ...(message.message_thread_id ? { messageThreadId: message.message_thread_id } : {})
+        }
+      }
+    ]
 
     for (const attachment of attachments) {
       parts.push({ type: "data-attachment", data: attachment })
@@ -147,7 +165,7 @@ export const telegramChannel = chat.channels.custom({
   bind: (update) => {
     const message = update.message
 
-    if (!message) {
+    if (!message || message.chat.type !== "private") {
       return null
     }
 
@@ -224,7 +242,12 @@ export const telegramAgent = chat.agent({
   storage: transcriptStorage,
   system: systemPrompt,
   onTurnStart: async ({ chatId, uiMessages }) => {
-    setChatAttachments(chatId, collectAttachments(uiMessages))
+    setUserAttachments(chatId, collectAttachments(uiMessages))
+
+    const target = extractLatestTelegramTarget(uiMessages)
+    if (target) {
+      setUserTelegramTarget(chatId, target)
+    }
   },
   tools: (event) => ({
     ...firecrawlTools,
