@@ -1,6 +1,7 @@
 import { timingSafeEqual } from 'node:crypto'
 import { configure, idempotencyKeys, tasks } from '@trigger.dev/sdk'
 import { Hono } from 'hono'
+import { resolveClerkBillingPortalUrl, userHasActivePlan } from './clerk-billing.js'
 import { startDeviceAuthorization, type ClerkDeviceAuthStart } from './clerk-device-auth.js'
 import { findClerkUserIdByTelegramId } from './db/channel-identifiers.js'
 import { env, requireEnv } from './env.js'
@@ -25,6 +26,8 @@ type PendingDeviceChallenge = {
 export type AppDependencies = {
   getTelegramWebhookSecret: () => string | undefined
   findClerkUserIdByTelegramId: (telegramUserId: string) => Promise<string | null>
+  hasRequiredPlan: (clerkUserId: string) => Promise<boolean>
+  resolveBillingPortalUrl: () => Promise<string>
   forwardToTriggerWebhook: (payload: AuthenticatedTelegramUpdate) => Promise<void>
   startDeviceAuthorization: () => Promise<ClerkDeviceAuthStart>
   triggerLinkAccountTask: (payload: {
@@ -185,6 +188,17 @@ function formatConnectAccountReply(challenge: {
   ].join('\n')
 }
 
+function formatUpgradeRequiredReply(billingPortalUrl: string): string {
+  return [
+    'A Pro subscription ($10/month) is required to use the assistant.',
+    '',
+    'Upgrade your plan in your account billing settings:',
+    billingPortalUrl,
+    '',
+    'Once subscribed, send your message again to continue.'
+  ].join('\n')
+}
+
 function isTelegramUpdate(value: unknown): value is TelegramUpdate {
   return (
     typeof value === 'object' &&
@@ -198,6 +212,8 @@ export function createApp(overrides: Partial<AppDependencies> = {}) {
   const deps: AppDependencies = {
     getTelegramWebhookSecret: () => env.telegramWebhookSecret,
     findClerkUserIdByTelegramId,
+    hasRequiredPlan: (clerkUserId) => userHasActivePlan(clerkUserId),
+    resolveBillingPortalUrl: resolveClerkBillingPortalUrl,
     forwardToTriggerWebhook: defaultForwardToTriggerWebhook,
     startDeviceAuthorization,
     triggerLinkAccountTask: defaultTriggerLinkAccountTask,
@@ -260,6 +276,29 @@ export function createApp(overrides: Partial<AppDependencies> = {}) {
 
     if (clerkUserId) {
       pendingChallenges.delete(telegramUserId)
+
+      let hasProPlan: boolean
+      try {
+        hasProPlan = await deps.hasRequiredPlan(clerkUserId)
+      } catch (error) {
+        console.error(
+          '[telegram-webhook] failed checking Clerk subscription:',
+          error instanceof Error ? error.message : String(error)
+        )
+        return c.json({ ok: false, error: 'subscription_check_failed' }, 502)
+      }
+
+      if (!hasProPlan) {
+        const billingPortalUrl = await deps.resolveBillingPortalUrl()
+
+        await deps.sendTelegramMessage({
+          chatId: message.chat.id,
+          text: formatUpgradeRequiredReply(billingPortalUrl),
+          messageThreadId: message.message_thread_id
+        })
+
+        return c.json({ ok: true, action: 'subscription_required', clerkUserId })
+      }
 
       try {
         await deps.forwardToTriggerWebhook({

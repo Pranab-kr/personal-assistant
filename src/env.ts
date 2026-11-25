@@ -50,8 +50,20 @@ export const env = {
   get clerkPublishableKey() {
     return readOptionalEnv('CLERK_PUBLISHABLE_KEY')
   },
+  get clerkSecretKey() {
+    return readOptionalEnv('CLERK_SECRET_KEY')
+  },
+  get clerkApiUrl() {
+    return (readOptionalEnv('CLERK_API_URL') ?? 'https://api.clerk.com').replace(/\/+$/, '')
+  },
   get clerkFrontendApiUrl() {
     return readOptionalEnv('CLERK_FRONTEND_API_URL')?.replace(/\/+$/, '')
+  },
+  get clerkAccountPortalUrl() {
+    return readOptionalEnv('CLERK_ACCOUNT_PORTAL_URL')?.replace(/\/+$/, '')
+  },
+  get clerkRequiredPlanSlug() {
+    return readOptionalEnv('CLERK_REQUIRED_PLAN_SLUG') ?? 'pro'
   },
   get clerkOAuthClientId() {
     return readOptionalEnv('CLERK_OAUTH_CLIENT_ID')
